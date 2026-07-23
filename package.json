@@ -1,0 +1,15 @@
+{
+  "name": "engine-noise-simulator",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Synthesized combustion/exotic engine voice for an EV, driven by the phone accelerometer. Includes a headless simulator that tests the accelerometer→throttle mapping and the audio synthesis.",
+  "type": "commonjs",
+  "scripts": {
+    "test": "node sim/test-motion.js && node sim/test-audio.js && node sim/render-audio.js && node sim/plot.js",
+    "test:motion": "node sim/test-motion.js",
+    "test:audio": "node sim/test-audio.js",
+    "render": "node sim/render-audio.js",
+    "plot": "node sim/plot.js",
+    "serve": "python3 -m http.server 8080"
+  }
+}

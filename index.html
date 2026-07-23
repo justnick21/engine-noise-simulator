@@ -1,0 +1,400 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
+<meta name="theme-color" content="#0a0c10" />
+<title>EV Engine Simulator</title>
+<style>
+  :root {
+    --bg: #0a0c10;
+    --panel: #12161d;
+    --line: #232a35;
+    --text: #e7edf5;
+    --muted: #8a94a6;
+    --accent: #ff5a3c;
+    --accent2: #37e0c8;
+    --redline: #ff3b30;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    background: radial-gradient(120% 100% at 50% -10%, #161b24 0%, var(--bg) 60%);
+    color: var(--text);
+    font: 15px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    display: flex; flex-direction: column;
+    min-height: 100dvh;
+    overflow: hidden;
+    user-select: none; -webkit-user-select: none;
+    padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+  }
+  header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 14px 18px 6px;
+  }
+  .brand { display: flex; align-items: center; gap: 9px; font-weight: 650; letter-spacing: .2px; }
+  .brand .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 12px var(--accent); }
+  .brand small { color: var(--muted); font-weight: 500; }
+  .status { font-size: 12px; color: var(--muted); }
+  .status b { color: var(--accent2); font-weight: 600; }
+
+  main { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; padding: 6px 16px; }
+
+  .gauge-wrap { position: relative; width: min(78vw, 340px); aspect-ratio: 1; }
+  canvas { width: 100%; height: 100%; display: block; }
+  .readout {
+    position: absolute; inset: 0; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; pointer-events: none;
+  }
+  .rpm { font-variant-numeric: tabular-nums; font-weight: 700; font-size: clamp(30px, 11vw, 52px); letter-spacing: -1px; }
+  .rpm span { font-size: .34em; color: var(--muted); font-weight: 600; margin-left: 4px; }
+  .subline { display: flex; gap: 18px; margin-top: 2px; color: var(--muted); font-size: 13px; }
+  .subline b { color: var(--text); font-weight: 650; font-variant-numeric: tabular-nums; }
+  .gear { color: var(--accent2) !important; }
+
+  .controls { width: 100%; max-width: 460px; display: flex; flex-direction: column; gap: 12px; padding-bottom: 4px; }
+  .row { display: flex; gap: 10px; }
+  .seg { flex: 1; display: flex; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+  .seg button {
+    flex: 1; background: none; border: 0; color: var(--muted); font: inherit; font-weight: 600;
+    padding: 11px 4px; cursor: pointer; transition: color .15s, background .15s;
+  }
+  .seg button.on { color: var(--text); background: linear-gradient(180deg, #1d2530, #171d26); box-shadow: inset 0 0 0 1px var(--line); }
+  .seg button.on::before { content: ""; }
+
+  .modes { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+  .modes button {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 11px;
+    color: var(--muted); font: inherit; font-weight: 600; font-size: 13px; padding: 10px 4px;
+    cursor: pointer; transition: color .15s, border-color .15s, background .15s;
+  }
+  .modes button .k { display: block; font-size: 10px; font-weight: 500; opacity: .6; margin-top: 2px; }
+  .modes button.on { color: var(--text); border-color: var(--accent); background: linear-gradient(180deg, #241a17, #171d26); }
+  .modes button.on .k { color: var(--accent); opacity: 1; }
+
+  .pedal {
+    position: relative; width: 100%; height: 66px; border-radius: 14px;
+    background: linear-gradient(180deg, #1a212b, #10151c);
+    border: 1px solid var(--line); color: var(--muted); font-weight: 650;
+    display: flex; align-items: center; justify-content: center; gap: 8px;
+    letter-spacing: .3px; cursor: pointer; overflow: hidden; touch-action: none;
+  }
+  .pedal .fill { position: absolute; left: 0; top: 0; bottom: 0; width: 0%;
+    background: linear-gradient(90deg, rgba(255,90,60,.25), rgba(255,90,60,.55)); transition: width .05s linear; }
+  .pedal span { position: relative; z-index: 1; }
+
+  .slider { display: flex; align-items: center; gap: 12px; color: var(--muted); font-size: 13px; }
+  input[type=range] { flex: 1; -webkit-appearance: none; appearance: none; height: 4px; border-radius: 3px;
+    background: var(--line); outline: none; }
+  input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 20px; height: 20px; border-radius: 50%;
+    background: var(--text); box-shadow: 0 1px 4px rgba(0,0,0,.5); cursor: pointer; }
+  input[type=range]::-moz-range-thumb { width: 20px; height: 20px; border: 0; border-radius: 50%; background: var(--text); cursor: pointer; }
+
+  .start-overlay {
+    position: fixed; inset: 0; z-index: 10; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: 18px; text-align: center; padding: 32px;
+    background: radial-gradient(100% 80% at 50% 30%, #141a24, #0a0c10 80%);
+  }
+  .start-overlay h1 { font-size: 24px; margin: 0; font-weight: 700; }
+  .start-overlay p { color: var(--muted); max-width: 320px; margin: 0; }
+  .start-btn {
+    margin-top: 6px; border: 0; border-radius: 100px; padding: 16px 46px; font: inherit; font-weight: 700;
+    font-size: 17px; color: #120704; cursor: pointer;
+    background: linear-gradient(180deg, #ff7a5c, var(--accent));
+    box-shadow: 0 8px 30px rgba(255,90,60,.4), inset 0 1px 0 rgba(255,255,255,.4);
+  }
+  .start-btn:active { transform: translateY(1px); }
+  .hidden { display: none !important; }
+  .hint { font-size: 12px; color: var(--muted); text-align: center; }
+</style>
+</head>
+<body>
+  <div class="start-overlay" id="overlay">
+    <div class="brand" style="font-size:15px"><span class="dot"></span> EV ENGINE <small>simulator</small></div>
+    <h1>Give your electric car<br>a soul.</h1>
+    <p>Synthesized engine noise that revs to your real acceleration. Mount your phone, tap start, and drive.</p>
+    <button class="start-btn" id="startBtn">Start Engine</button>
+    <div class="hint" id="startHint">Uses your device's motion sensor · nothing leaves your phone</div>
+  </div>
+
+  <header>
+    <div class="brand"><span class="dot"></span> EV ENGINE <small>sim</small></div>
+    <div class="status" id="status">motion: <b id="motionState">—</b> · <b id="calState">—</b></div>
+  </header>
+
+  <main>
+    <div class="gauge-wrap">
+      <canvas id="tach" width="680" height="680"></canvas>
+      <div class="readout">
+        <div class="rpm"><span id="rpmVal">0</span><span>rpm</span></div>
+        <div class="subline">
+          <div>gear <b class="gear" id="gearVal">N</b></div>
+          <div><b id="speedVal">0</b> km/h</div>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <div class="controls">
+    <div class="modes" id="modeGrid"></div>
+
+    <div class="pedal" id="pedal">
+      <div class="fill" id="pedalFill"></div>
+      <span>HOLD TO REV</span>
+    </div>
+
+    <div class="slider">
+      <span>VOL</span>
+      <input type="range" id="vol" min="0" max="100" value="70" />
+    </div>
+  </div>
+
+<script src="engine-core.js"></script>
+<script>
+"use strict";
+(() => {
+  const EC = window.EngineCore;
+
+  // ---------- state ----------
+  let ctx = null, running = false, nodes = null;
+  let volume = 0.7;
+  let modeIdx = 0;
+  const mode = () => EC.MODES[modeIdx];
+
+  const mapper = new EC.MotionMapper();
+  const drive = new EC.DriveModel();
+  let motion = { throttle: 0, brake: 0, signLocked: false, confident: false };
+  let pedalThrottle = 0;
+  let motionActive = false;
+  let lastFrame = 0, lastMotionTs = 0;
+
+  // ---------- audio graph (fixed shape, driven by voicing()) ----------
+  const WAVES = {}; // cache of built-in-type PeriodicWaves not needed; engine wave per mode
+  let engineWave = null;
+
+  function makeEngineWave(harmonics, oddBias) {
+    const real = new Float32Array(harmonics + 1);
+    const imag = new Float32Array(harmonics + 1);
+    for (let n = 1; n <= harmonics; n++) {
+      let amp = 1 / n;
+      if (n % 2 === 1) amp *= oddBias;
+      amp *= Math.exp(-n / (harmonics * 0.9));
+      imag[n] = amp;
+    }
+    return ctx.createPeriodicWave(real, imag, { disableNormalization: false });
+  }
+  function makeNoiseBuffer() {
+    const len = ctx.sampleRate * 2;
+    const buf = ctx.createBuffer(1, len, ctx.sampleRate);
+    const d = buf.getChannelData(0);
+    for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
+    return buf;
+  }
+
+  const OSC_N = 3;
+  function buildGraph() {
+    const master = ctx.createGain(); master.gain.value = 0;
+    const comp = ctx.createDynamicsCompressor();
+    comp.threshold.value = -14; comp.ratio.value = 4; comp.attack.value = 0.004; comp.release.value = 0.12;
+    master.connect(comp).connect(ctx.destination);
+
+    const toneGain = ctx.createGain(); toneGain.gain.value = 1;
+    const lp = ctx.createBiquadFilter(); lp.type = "lowpass"; lp.frequency.value = 400; lp.Q.value = 0.7;
+    toneGain.connect(lp).connect(master);
+
+    const osc = [], oscGain = [], oscWave = [];
+    for (let i = 0; i < OSC_N; i++) {
+      const o = ctx.createOscillator(); o.type = "sawtooth"; o.frequency.value = 60;
+      const g = ctx.createGain(); g.gain.value = 0;
+      o.connect(g).connect(toneGain); o.start();
+      osc.push(o); oscGain.push(g); oscWave.push("");
+    }
+    const sub = ctx.createOscillator(); sub.type = "triangle"; sub.frequency.value = 30;
+    const subGain = ctx.createGain(); subGain.gain.value = 0;
+    sub.connect(subGain).connect(master); sub.start();
+
+    const noise = ctx.createBufferSource(); noise.buffer = makeNoiseBuffer(); noise.loop = true;
+    const noiseBP = ctx.createBiquadFilter(); noiseBP.type = "bandpass"; noiseBP.frequency.value = 1600; noiseBP.Q.value = 1;
+    const noiseGain = ctx.createGain(); noiseGain.gain.value = 0;
+    noise.connect(noiseBP).connect(noiseGain).connect(master); noise.start();
+
+    const whine = ctx.createOscillator(); whine.type = "sine"; whine.frequency.value = 400;
+    const whineGain = ctx.createGain(); whineGain.gain.value = 0;
+    whine.connect(whineGain).connect(master); whine.start();
+
+    nodes = { master, toneGain, lp, osc, oscGain, oscWave, sub, subGain, noiseBP, noiseGain, whine, whineGain };
+  }
+
+  function setOscWave(i, wave) {
+    if (nodes.oscWave[i] === wave) return;
+    nodes.oscWave[i] = wave;
+    const o = nodes.osc[i];
+    if (wave === "engine") o.setPeriodicWave(engineWave);
+    else o.type = wave === "saw" ? "sawtooth" : wave;
+  }
+
+  function applyVoice(vs) {
+    if (!nodes) return;
+    const t = ctx.currentTime, tc = 0.03;
+    for (let i = 0; i < OSC_N; i++) {
+      const spec = vs.osc[i];
+      if (spec) {
+        setOscWave(i, spec.wave || "saw");
+        nodes.osc[i].frequency.setTargetAtTime(spec.freq, t, tc);
+        nodes.osc[i].detune.setTargetAtTime(spec.detune || 0, t, tc);
+        nodes.oscGain[i].gain.setTargetAtTime(spec.gain, t, tc);
+      } else {
+        nodes.oscGain[i].gain.setTargetAtTime(0, t, tc);
+      }
+    }
+    nodes.sub.frequency.setTargetAtTime(Math.max(8, vs.sub.freq), t, tc);
+    nodes.subGain.gain.setTargetAtTime(vs.sub.gain, t, tc);
+    nodes.noiseBP.frequency.setTargetAtTime(vs.noise.bp, t, tc);
+    nodes.noiseBP.Q.value = vs.noise.q;
+    nodes.noiseGain.gain.setTargetAtTime(vs.noise.gain, t, tc);
+    nodes.whine.frequency.setTargetAtTime(Math.max(20, vs.whine.freq), t, tc);
+    nodes.whineGain.gain.setTargetAtTime(vs.whine.gain, t, tc);
+    nodes.lp.frequency.setTargetAtTime(vs.lp, t, tc);
+    nodes.master.gain.setTargetAtTime(running ? volume * vs.master : 0, t, tc);
+  }
+
+  function setMode(i) {
+    modeIdx = i;
+    drive.reset();
+    if (ctx) engineWave = makeEngineWave(mode().harmonics || 18, mode().oddBias || 1);
+    // force waveform refresh next frame
+    if (nodes) nodes.oscWave = nodes.oscWave.map(() => "");
+    document.querySelectorAll("#modeGrid button").forEach((b, idx) =>
+      b.classList.toggle("on", idx === i));
+  }
+
+  // ---------- render loop ----------
+  const cv = document.getElementById("tach");
+  const g = cv.getContext("2d");
+  const rpmEl = document.getElementById("rpmVal");
+  const gearEl = document.getElementById("gearVal");
+  const speedEl = document.getElementById("speedVal");
+  const pedalFill = document.getElementById("pedalFill");
+  const calEl = document.getElementById("calState");
+
+  function drawTach(rpm) {
+    const m = mode();
+    const W = cv.width, H = cv.height, cx = W / 2, cy = H / 2, r = W * 0.42;
+    const a0 = Math.PI * 0.75, a1 = Math.PI * 2.25;
+    g.clearRect(0, 0, W, H);
+    g.lineWidth = 16; g.lineCap = "round";
+    g.strokeStyle = "#1c232e"; g.beginPath(); g.arc(cx, cy, r, a0, a1); g.stroke();
+    const redFrac = 0.86;
+    g.strokeStyle = "rgba(255,59,48,.7)"; g.beginPath(); g.arc(cx, cy, r, a0 + (a1 - a0) * redFrac, a1); g.stroke();
+    const frac = Math.min(1, rpm / m.redline);
+    const over = frac >= redFrac;
+    g.strokeStyle = over ? "#ff3b30" : "#ff5a3c";
+    g.shadowBlur = 24; g.shadowColor = g.strokeStyle; g.lineWidth = 16;
+    g.beginPath(); g.arc(cx, cy, r, a0, a0 + (a1 - a0) * frac); g.stroke();
+    g.shadowBlur = 0;
+    const majors = 8;
+    g.fillStyle = "#5b6675"; g.font = "600 22px sans-serif"; g.textAlign = "center"; g.textBaseline = "middle";
+    for (let i = 0; i <= majors; i++) {
+      const a = a0 + (a1 - a0) * (i / majors), rr = r - 30;
+      g.save(); g.translate(cx + Math.cos(a) * rr, cy + Math.sin(a) * rr);
+      g.fillText(Math.round((m.redline / 1000) * (i / majors)).toString(), 0, 0); g.restore();
+    }
+    const na = a0 + (a1 - a0) * frac;
+    g.strokeStyle = "#e7edf5"; g.lineWidth = 5; g.lineCap = "round";
+    g.beginPath(); g.moveTo(cx - Math.cos(na) * 20, cy - Math.sin(na) * 20);
+    g.lineTo(cx + Math.cos(na) * (r - 24), cy + Math.sin(na) * (r - 24)); g.stroke();
+    g.fillStyle = "#e7edf5"; g.beginPath(); g.arc(cx, cy, 10, 0, 7); g.fill();
+  }
+
+  function frame(ts) {
+    if (!lastFrame) lastFrame = ts;
+    const dt = Math.min(0.05, (ts - lastFrame) / 1000);
+    lastFrame = ts;
+
+    const throttle = Math.min(1, Math.max(motion.throttle, pedalThrottle));
+    const brake = motion.brake;
+    let d = { rpm: 0, speed: 0, gear: 0 };
+    if (running) d = drive.step(mode(), throttle, brake, dt);
+    if (running) applyVoice(EC.voicing(mode(), d.rpm, throttle, d.speed));
+
+    drawTach(d.rpm);
+    rpmEl.textContent = Math.round(d.rpm);
+    gearEl.textContent = running ? (mode().transmission === "linear" ? "—" : d.gear + 1) : "N";
+    speedEl.textContent = Math.round(d.speed * 220);
+    pedalFill.style.width = throttle * 100 + "%";
+    if (running && motionActive)
+      calEl.textContent = motion.confident ? "locked" : motion.signLocked ? "aligning" : "calibrating";
+    requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+
+  // ---------- accelerometer ----------
+  function onMotion(ev) {
+    if (!ev.accelerationIncludingGravity) return;
+    const now = ev.timeStamp || performance.now();
+    let dt = lastMotionTs ? (now - lastMotionTs) / 1000 : 0.016;
+    lastMotionTs = now;
+    if (ev.interval) dt = ev.interval; // seconds, iOS
+    const r = mapper.update(
+      { accelerationIncludingGravity: ev.accelerationIncludingGravity, acceleration: ev.acceleration },
+      dt
+    );
+    motion = { throttle: r.throttle, brake: r.brake, signLocked: r.signLocked, confident: mapper.confident };
+    motionActive = true;
+  }
+
+  async function enableMotion() {
+    const stEl = document.getElementById("motionState");
+    try {
+      if (typeof DeviceMotionEvent !== "undefined" && typeof DeviceMotionEvent.requestPermission === "function") {
+        const res = await DeviceMotionEvent.requestPermission();
+        if (res !== "granted") { stEl.textContent = "denied — use pedal"; return; }
+      } else if (!("ondevicemotion" in window)) {
+        stEl.textContent = "unavailable — use pedal"; return;
+      }
+      window.addEventListener("devicemotion", onMotion, { passive: true });
+      stEl.textContent = "live";
+      setTimeout(() => { if (!motionActive) stEl.textContent = "no data — use pedal"; }, 1200);
+    } catch (err) {
+      stEl.textContent = "error — use pedal";
+    }
+  }
+
+  // ---------- pedal ----------
+  const pedal = document.getElementById("pedal");
+  const pDown = (e) => { pedalThrottle = 1; e.preventDefault(); };
+  const pUp = () => { pedalThrottle = 0; };
+  pedal.addEventListener("pointerdown", pDown);
+  window.addEventListener("pointerup", pUp);
+  pedal.addEventListener("pointercancel", pUp);
+
+  // ---------- mode grid ----------
+  const grid = document.getElementById("modeGrid");
+  EC.MODES.forEach((m, i) => {
+    const b = document.createElement("button");
+    const kindLabel = m.kind === "combustion" ? "engine" : m.kind;
+    b.innerHTML = `${m.name}<span class="k">${kindLabel}</span>`;
+    if (i === 0) b.classList.add("on");
+    b.addEventListener("click", () => setMode(i));
+    grid.appendChild(b);
+  });
+
+  document.getElementById("vol").addEventListener("input", (e) => { volume = e.target.value / 100; });
+
+  // ---------- start ----------
+  document.getElementById("startBtn").addEventListener("click", async () => {
+    if (!ctx) {
+      ctx = new (window.AudioContext || window.webkitAudioContext)();
+      buildGraph();
+      engineWave = makeEngineWave(mode().harmonics || 18, mode().oddBias || 1);
+    }
+    await ctx.resume();
+    running = true;
+    document.getElementById("overlay").classList.add("hidden");
+    calEl.textContent = "calibrating";
+    enableMotion();
+  });
+})();
+</script>
+</body>
+</html>
