@@ -284,14 +284,21 @@
       this.rpm = 0;
       this.gear = 0;
     }
-    step(mode, throttle, brake, dt) {
+    // absSpeed (normalized 0..1), when provided, comes from real GPS-fused speed
+    // and drives the gearbox directly — so cruising at constant velocity holds
+    // revs instead of sagging to idle. Omit it for the accelerometer-only feel.
+    step(mode, throttle, brake, dt, absSpeed) {
       dt = clamp(dt, 0.001, 0.1);
-      const power = mode.power ?? 0.55;
-      const drag = mode.drag ?? 0.45;
-      const coast = mode.coast ?? 0.02;
-      const braking = (mode.braking ?? 1.2) * brake;
-      this.speed += (throttle * power - drag * this.speed - coast - braking * this.speed) * dt;
-      this.speed = clamp(this.speed, 0, 1);
+      if (absSpeed != null) {
+        this.speed = clamp(absSpeed, 0, 1);
+      } else {
+        const power = mode.power ?? 0.55;
+        const drag = mode.drag ?? 0.45;
+        const coast = mode.coast ?? 0.02;
+        const braking = (mode.braking ?? 1.2) * brake;
+        this.speed += (throttle * power - drag * this.speed - coast - braking * this.speed) * dt;
+        this.speed = clamp(this.speed, 0, 1);
+      }
 
       let target;
       if (mode.transmission === "linear") {
@@ -314,6 +321,58 @@
       this.rpm += (target - this.rpm) * k;
       this.rpm *= 1 + (pseudoJitter() - 0.5) * 0.006;
       return { speed: this.speed, gear: this.gear, rpm: this.rpm };
+    }
+  }
+
+  /*
+   * SpeedEstimator — complementary filter fusing accelerometer dead-reckoning
+   * (fast, drifts) with GPS Doppler speed (accurate, ~1 Hz, laggy).
+   *
+   *   predict(longitudinal, dt)  — integrate forward accel between GPS fixes
+   *   correctGPS(gpsSpeed)       — pull the estimate toward each GPS reading
+   *   norm()                     — normalized 0..1 speed for the gearbox
+   *
+   * This is what lets "flying along without accelerating" be understood: the
+   * accelerometer reads ~0 at constant velocity, but GPS keeps speed pinned.
+   */
+  class SpeedEstimator {
+    constructor(opts = {}) {
+      this.o = Object.assign(
+        {
+          vMax: 55, // m/s that maps to full speed (~200 km/h)
+          gpsGain: 0.4, // correction strength per GPS fix
+          driftDecay: 5, // s; if GPS goes silent, bleed dead-reckoning away
+          staleAfter: 3, // s without a fix before we distrust dead-reckoning
+        },
+        opts
+      );
+      this.reset();
+    }
+    reset() {
+      this.speed = 0; // m/s
+      this.hasGps = false;
+      this.sinceFix = 1e9;
+    }
+    predict(longitudinal, dt) {
+      dt = clamp(dt || 0.016, 0.001, 0.25);
+      this.sinceFix += dt;
+      // integrate forward acceleration (m/s^2) into speed (m/s)
+      this.speed = Math.max(0, this.speed + (longitudinal || 0) * dt);
+      // if GPS has dropped out, don't let integrated drift run away forever
+      if (this.hasGps && this.sinceFix > this.o.staleAfter) {
+        this.speed *= Math.exp(-dt / this.o.driftDecay);
+      }
+      return this.speed;
+    }
+    correctGPS(gpsSpeed) {
+      if (gpsSpeed == null || !(gpsSpeed >= 0)) return; // null/NaN/negative = no fix
+      this.hasGps = true;
+      this.sinceFix = 0;
+      this.speed += this.o.gpsGain * (gpsSpeed - this.speed);
+      if (this.speed < 0) this.speed = 0;
+    }
+    norm() {
+      return clamp(this.speed / this.o.vMax, 0, 1);
     }
   }
 
@@ -438,7 +497,7 @@
 
   const EngineCore = {
     V, clamp, G,
-    MotionMapper, DriveModel,
+    MotionMapper, DriveModel, SpeedEstimator,
     MODES, modeById, voicing,
     principalAxis2x2,
   };

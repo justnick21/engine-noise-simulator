@@ -27,6 +27,19 @@ real problem. `engine-core.js` (`MotionMapper`) does it:
    braking reads as engine-braking rather than a phantom rev.
 5. **Smoothing** — asymmetric (fast attack / slow release) + deadzone.
 
+### GPS speed fusion
+
+Accelerometer-only can't tell you're moving: at constant velocity acceleration
+is ~0, so revs sag to idle at a steady 70 mph. `SpeedEstimator` fuses the phone's
+**GPS Doppler speed** (`coords.speed`, accurate and absolute but ~1 Hz and laggy)
+with accelerometer dead-reckoning (fast but drifts) in a complementary filter:
+integrate forward accel between fixes, correct toward each GPS reading. The
+gearbox then runs off real speed, so **cruising holds revs**. `node
+sim/test-speed.js` proves it — GPS-fused cruise holds ~4600 rpm where accel-only
+sags to ~1300, tracks true speed to ~1 m/s, survives a 4 s GPS dropout on dead
+reckoning, and stays smooth under noisy fixes. Falls back to the accel-only feel
+when GPS is unavailable.
+
 ### It's verified, not vibes
 
 `node sim/test-motion.js` synthesizes DeviceMotion streams for scripted drive

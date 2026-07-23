@@ -123,7 +123,51 @@ function bumps(amp, hz) {
   return (t) => ({ ax: 0, ay: 0, az: amp * Math.sin(2 * Math.PI * hz * t) * (0.6 + 0.4 * Math.sin(t * 3.1)) });
 }
 
+/*
+ * addGPS — attach synthetic GPS Doppler-speed fixes to a generated stream.
+ * True forward speed is the integral of the profile's longitudinal accel (ax);
+ * GPS reports it at ~1 Hz, delayed by `latency` and blurred by `noise`, exactly
+ * like a phone. Each stream sample gains `gps` = { speed } on a fix, else null.
+ * `dropout: [t0, t1]` simulates a tunnel / lost signal window.
+ * Also tags every sample with `truth.speed` (ground-truth m/s) for assertions.
+ */
+function addGPS(stream, opts = {}) {
+  const hz = opts.hz || 1;
+  const latency = opts.latency ?? 0.6;
+  const noise = opts.noise ?? 0.35;
+  const dropout = opts.dropout || null;
+  const rng = mulberry32(opts.seed ?? 7);
+
+  // integrate true forward speed (m/s), clamped at 0 (can't reverse)
+  const speed = new Array(stream.length);
+  let s = 0;
+  for (let i = 0; i < stream.length; i++) {
+    s = Math.max(0, s + (stream[i].truth.ax || 0) * stream[i].dt);
+    speed[i] = s;
+    stream[i].truth.speed = s;
+    stream[i].gps = null;
+  }
+  const speedAt = (t) => {
+    if (t <= 0) return speed[0];
+    const idx = Math.min(speed.length - 1, Math.round(t / stream[0].dt));
+    return speed[idx];
+  };
+
+  const period = 1 / hz;
+  let nextFix = 0;
+  for (let i = 0; i < stream.length; i++) {
+    const t = stream[i].t;
+    if (t >= nextFix) {
+      nextFix += period;
+      if (dropout && t >= dropout[0] && t < dropout[1]) continue; // no signal
+      const measured = Math.max(0, speedAt(t - latency) + gauss(rng) * noise);
+      stream[i].gps = { speed: measured };
+    }
+  }
+  return stream;
+}
+
 module.exports = {
-  G, generate, eulerMatrix, apply, deg,
+  G, generate, addGPS, eulerMatrix, apply, deg,
   pulse, combine, asAx, asAy, bumps, smoothstep,
 };

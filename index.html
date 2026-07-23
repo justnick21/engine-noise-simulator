@@ -119,7 +119,7 @@
 
   <header>
     <div class="brand"><span class="dot"></span> EV ENGINE <small>sim</small></div>
-    <div class="status" id="status">motion: <b id="motionState">—</b> · <b id="calState">—</b></div>
+    <div class="status" id="status">motion: <b id="motionState">—</b> · <b id="calState">—</b> · gps <b id="gpsState">—</b></div>
   </header>
 
   <main>
@@ -163,9 +163,10 @@
 
   const mapper = new EC.MotionMapper();
   const drive = new EC.DriveModel();
-  let motion = { throttle: 0, brake: 0, signLocked: false, confident: false };
+  const speedEst = new EC.SpeedEstimator();
+  let motion = { throttle: 0, brake: 0, longitudinal: 0, signLocked: false, confident: false };
   let pedalThrottle = 0;
-  let motionActive = false;
+  let motionActive = false, gpsActive = false, geoWatch = null;
   let lastFrame = 0, lastMotionTs = 0;
 
   // ---------- audio graph (fixed shape, driven by voicing()) ----------
@@ -313,14 +314,18 @@
 
     const throttle = Math.min(1, Math.max(motion.throttle, pedalThrottle));
     const brake = motion.brake;
+    // When GPS is live, feed real fused speed to the gearbox (holds revs at
+    // constant velocity); otherwise the accel-only integrator drives it.
+    const absSpeed = gpsActive ? speedEst.norm() : undefined;
     let d = { rpm: 0, speed: 0, gear: 0 };
-    if (running) d = drive.step(mode(), throttle, brake, dt);
+    if (running) d = drive.step(mode(), throttle, brake, dt, absSpeed);
     if (running) applyVoice(EC.voicing(mode(), d.rpm, throttle, d.speed));
 
     drawTach(d.rpm);
     rpmEl.textContent = Math.round(d.rpm);
     gearEl.textContent = running ? (mode().transmission === "linear" ? "—" : d.gear + 1) : "N";
-    speedEl.textContent = Math.round(d.speed * 220);
+    // real km/h from GPS-fused speed when available, else the cosmetic model
+    speedEl.textContent = gpsActive ? Math.round(speedEst.speed * 3.6) : Math.round(d.speed * 220);
     pedalFill.style.width = throttle * 100 + "%";
     if (running && motionActive)
       calEl.textContent = motion.confident ? "locked" : motion.signLocked ? "aligning" : "calibrating";
@@ -339,8 +344,26 @@
       { accelerationIncludingGravity: ev.accelerationIncludingGravity, acceleration: ev.acceleration },
       dt
     );
-    motion = { throttle: r.throttle, brake: r.brake, signLocked: r.signLocked, confident: mapper.confident };
+    motion = { throttle: r.throttle, brake: r.brake, longitudinal: r.longitudinal, signLocked: r.signLocked, confident: mapper.confident };
+    // dead-reckon speed from forward accel between GPS fixes (high rate)
+    if (gpsActive) speedEst.predict(r.longitudinal, dt);
     motionActive = true;
+  }
+
+  // ---------- GPS (Doppler speed) ----------
+  function enableGeo() {
+    const gpsEl = document.getElementById("gpsState");
+    if (!("geolocation" in navigator)) { gpsEl.textContent = "n/a"; return; }
+    gpsEl.textContent = "…";
+    geoWatch = navigator.geolocation.watchPosition(
+      (pos) => {
+        const sp = pos.coords.speed; // m/s, Doppler-derived; null when unavailable
+        if (sp != null && sp >= 0) { speedEst.correctGPS(sp); gpsActive = true; gpsEl.textContent = "live"; }
+        else if (!gpsActive) gpsEl.textContent = "no speed";
+      },
+      (err) => { gpsEl.textContent = err.code === 1 ? "denied" : "error"; },
+      { enableHighAccuracy: true, maximumAge: 1000, timeout: 15000 }
+    );
   }
 
   async function enableMotion() {
@@ -389,6 +412,7 @@
     // synchronously within the tap — BEFORE any await, which would consume the
     // user-gesture activation and make the request throw. So fire motion first.
     const motionReady = enableMotion();
+    enableGeo(); // GPS Doppler speed → holds revs at constant velocity
     if (!ctx) {
       ctx = new (window.AudioContext || window.webkitAudioContext)();
       buildGraph();
