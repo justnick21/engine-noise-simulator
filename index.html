@@ -354,9 +354,11 @@
       }
       window.addEventListener("devicemotion", onMotion, { passive: true });
       stEl.textContent = "live";
-      setTimeout(() => { if (!motionActive) stEl.textContent = "no data — use pedal"; }, 1200);
+      setTimeout(() => { if (!motionActive) stEl.textContent = "no data — check Settings ▸ Safari ▸ Motion"; }, 1500);
     } catch (err) {
-      stEl.textContent = "error — use pedal";
+      // Usually: requestPermission() called outside a user gesture, or Motion
+      // access disabled in Safari settings.
+      stEl.textContent = "blocked — enable Motion in Safari settings";
     }
   }
 
@@ -383,16 +385,20 @@
 
   // ---------- start ----------
   document.getElementById("startBtn").addEventListener("click", async () => {
+    // iOS requires DeviceMotionEvent.requestPermission() to be called
+    // synchronously within the tap — BEFORE any await, which would consume the
+    // user-gesture activation and make the request throw. So fire motion first.
+    const motionReady = enableMotion();
     if (!ctx) {
       ctx = new (window.AudioContext || window.webkitAudioContext)();
       buildGraph();
       engineWave = makeEngineWave(mode().harmonics || 18, mode().oddBias || 1);
     }
-    await ctx.resume();
+    ctx.resume(); // also invoked in-gesture (do not await before it)
     running = true;
     document.getElementById("overlay").classList.add("hidden");
     calEl.textContent = "calibrating";
-    enableMotion();
+    await motionReady;
   });
 })();
 </script>
